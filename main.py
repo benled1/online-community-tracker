@@ -10,15 +10,19 @@ from data_ingestion import ChatConsumer
 load_dotenv()
 
 if __name__ == "__main__":
-    caseoh_consumer = ChatConsumer("caseoh_")
-    stableronaldo_consumer = ChatConsumer("stableronaldo")
+    jynxi_consumer = ChatConsumer("jynxzi")
+    seagull_consumer = ChatConsumer("a_seagull")
+    shroud_consumer = ChatConsumer("shroud")
 
-    # either have to create asnchronous consumer or execute each in separate thread.
-    stableronaldo_consumer_thread = threading.Thread(target=stableronaldo_consumer.consume_chats)
-    caseoh_consumer_thread = threading.Thread(target=caseoh_consumer.consume_chats)
-    stableronaldo_consumer_thread.start()
-    caseoh_consumer_thread.start()
+    jynxi_consumer_thread = threading.Thread(target=jynxi_consumer.consume_chats)
+    seagull_consumer_thread = threading.Thread(target=seagull_consumer.consume_chats)
+    shroud_consumer_thread = threading.Thread(target=shroud_consumer.consume_chats)
 
-    stableronaldo_consumer_thread.join()
-    caseoh_consumer_thread.join()
+    jynxi_consumer_thread.start()
+    seagull_consumer_thread.start()
+    shroud_consumer_thread.start()
+
+    jynxi_consumer_thread.join()
+    seagull_consumer_thread.join()
+    shroud_consumer_thread.join()
 

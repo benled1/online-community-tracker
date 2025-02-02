@@ -1,8 +1,10 @@
 import os
 import socket
-
+import psycopg2
 import requests
+import time
 from dotenv import load_dotenv
+from psycopg2 import sql
 
 
 class ChatConsumer:
@@ -22,10 +24,7 @@ class ChatConsumer:
         self._handle_messages()
 
     def _validate_access_token(self) -> dict:
-        """
-        Validates the given access token using Twitch's /validate endpoint.
-        Returns a dict containing validation info if token is valid, or raises an exception if invalid.
-        """
+        """Validates the given access token using Twitch's /validate endpoint."""
         headers = {
             "Authorization": f"OAuth {self.access_token}"
         }
@@ -45,22 +44,71 @@ class ChatConsumer:
         print(f"Connected to Twitch chat in #{self.channel}")
 
     def _handle_messages(self):
-        """Receive and print chat messages."""
+        """Handle chat messages and insert into database."""
         try:
             while True:
                 response = self.sock.recv(2048).decode("utf-8")
-                
+
                 if response.startswith("PING"):
                     self.sock.send("PONG :tmi.twitch.tv\n".encode("utf-8"))
-                
+
                 elif "PRIVMSG" in response:
+                    start_time = time.time()
+
                     parts = response.split(":", 2)
                     if len(parts) > 2:
                         message = parts[2].strip()
                         username = parts[1].split("!")[0]
-                        print(f"From{self.channel}: {username}: {message}")
-        
+                        print(f"{username}: {message}")
+
+                        self._insert_message(username, message, self.channel)
+
+                    end_time = time.time()
+                    elapsed_time = end_time - start_time
+                    print(f"Processing time: {elapsed_time:.4f} seconds")
+
         except KeyboardInterrupt:
             print("\nDisconnected from Twitch chat.")
         except Exception as e:
             print(f"Error: {e}")
+
+    def _insert_message(self, sender_name, message, channel):
+        """Insert a message into the chat_messages table."""
+        conn = None
+        try:
+            conn = psycopg2.connect(
+                dbname="postgres",
+                user="postgres",
+                password="password",
+                host="localhost",
+                port="5432"
+            )
+            cur = conn.cursor()
+
+            # Ensure the chat_messages table exists
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS chat_messages (
+                    id SERIAL PRIMARY KEY,
+                    sender_name TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    channel TEXT NOT NULL,
+                    timestamp TIMESTAMPTZ DEFAULT NOW()
+                );
+            """)
+            conn.commit()
+
+            # Insert the chat message into the table
+            cur.execute(
+                "INSERT INTO chat_messages (sender_name, message, channel) VALUES (%s, %s, %s);",
+                (sender_name, message, channel)
+            )
+            
+            conn.commit()
+            cur.close()
+            print(f"Message from {sender_name} in #{channel} inserted successfully.")
+
+        except Exception as e:
+            print("Database Error:", e)
+        finally:
+            if conn:
+                conn.close()
