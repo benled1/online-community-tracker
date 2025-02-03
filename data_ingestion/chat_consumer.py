@@ -1,8 +1,9 @@
 import os
 import socket
+import time
+
 import psycopg2
 import requests
-import time
 from dotenv import load_dotenv
 from psycopg2 import sql
 
@@ -85,7 +86,6 @@ class ChatConsumer:
             )
             cur = conn.cursor()
 
-            # Ensure the chat_messages table exists
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS chat_messages (
                     id SERIAL PRIMARY KEY,
@@ -97,7 +97,6 @@ class ChatConsumer:
             """)
             conn.commit()
 
-            # Insert the chat message into the table
             cur.execute(
                 "INSERT INTO chat_messages (sender_name, message, channel) VALUES (%s, %s, %s);",
                 (sender_name, message, channel)
