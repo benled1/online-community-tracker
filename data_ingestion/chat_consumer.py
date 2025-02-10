@@ -7,12 +7,13 @@ import threading
 import time
 from datetime import datetime
 
+# Import the MongoClient type for type hints (if desired)
 from pymongo import MongoClient
 
 logger = logging.getLogger(__name__)
 
 class ChatConsumer:
-    def __init__(self, channel_name: str) -> None:
+    def __init__(self, channel_name: str, mongo_client: MongoClient) -> None:
         self.channel = channel_name
 
         self.access_token = os.getenv("TWITCH_ACCESS_TOKEN")
@@ -28,14 +29,15 @@ class ChatConsumer:
 
         self.message_buffer = []
 
-        mongo_uri = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
-        self.client = MongoClient(mongo_uri)
+        self.client = mongo_client
         self.db = self.client.get_database(os.getenv("MONGODB_DB", "chat_db"))
         self.collection = self.db.get_collection(os.getenv("MONGODB_COLLECTION", "chat_messages"))
 
         self._stop_event = threading.Event()
 
-        self.message_pattern = re.compile(r"^:(\w+)!\w+@\w+\.tmi\.twitch\.tv PRIVMSG #(\w+) :(.+)$")
+        self.message_pattern = re.compile(
+            r"^:(\w+)!\w+@\w+\.tmi\.twitch\.tv PRIVMSG #(\w+) :(.+)$"
+        )
 
     def consume_chats(self) -> None:
         try:
@@ -43,7 +45,6 @@ class ChatConsumer:
             self._handle_messages()
         finally:
             self._flush_messages()
-            self._cleanup()
 
     def _connect_to_twitch(self) -> None:
         token = f"oauth:{self.access_token}"
@@ -109,7 +110,8 @@ class ChatConsumer:
             "channel": channel,
             "timestamp": datetime.utcnow()
         })
-        if len(self.message_buffer) >= 10: self._flush_messages()
+        if len(self.message_buffer) >= 10:
+            self._flush_messages()
 
     def _flush_messages(self) -> None:
         if self.message_buffer:
@@ -129,8 +131,3 @@ class ChatConsumer:
         except Exception as e:
             logger.exception("Error closing socket: %s", e)
 
-    def _cleanup(self) -> None:
-        try:
-            self.client.close()
-        except Exception as e:
-            logger.exception("Error closing MongoDB client: %s", e)

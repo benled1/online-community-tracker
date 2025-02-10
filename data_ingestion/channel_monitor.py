@@ -4,6 +4,7 @@ import threading
 
 import requests
 from dotenv import load_dotenv
+from pymongo import MongoClient
 
 from data_ingestion.chat_consumer import ChatConsumer
 
@@ -26,6 +27,9 @@ class ChannelMonitor:
         self.lock = threading.Lock()
         self.session = requests.Session()
         self._stop_event = threading.Event()
+
+        mongo_uri = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
+        self.mongo_client = MongoClient(mongo_uri)
 
     def _get_top_channels(self) -> set[str]:
         client_id = os.getenv("TWITCH_CLIENT_ID")
@@ -65,9 +69,12 @@ class ChannelMonitor:
                 for channel in top_channels:
                     if channel not in self.channel_consumers:
                         logger.info("Starting chat consumer for channel: %s", channel)
-                        consumer = ChatConsumer(channel)
-                        thread = threading.Thread(target=consumer.consume_chats, daemon=True,
-                                                  name=f"Consumer-{channel}")
+                        consumer = ChatConsumer(channel, self.mongo_client)
+                        thread = threading.Thread(
+                            target=consumer.consume_chats,
+                            daemon=True,
+                            name=f"Consumer-{channel}"
+                        )
                         self.channel_consumers[channel] = (consumer, thread)
                         thread.start()
 
@@ -91,8 +98,11 @@ class ChannelMonitor:
                 logger.info("Starting ChannelMonitor...")
                 self.running = True
                 self._stop_event.clear()
-                self.thread = threading.Thread(target=self._monitor_channels, daemon=True,
-                                               name="ChannelMonitorThread")
+                self.thread = threading.Thread(
+                    target=self._monitor_channels,
+                    daemon=True,
+                    name="ChannelMonitorThread"
+                )
                 self.thread.start()
 
     def stop(self) -> None:
@@ -112,3 +122,4 @@ class ChannelMonitor:
 
     def close(self) -> None:
         self.session.close()
+        self.mongo_client.close()
