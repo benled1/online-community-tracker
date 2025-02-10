@@ -1,71 +1,75 @@
+import logging
 import os
-import threading
-import requests
-import time
-from dotenv import load_dotenv
+from datetime import datetime
 
-from data_ingestion import ChatConsumer
+import uvicorn
+from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException
+from pymongo import MongoClient
+
+from data_ingestion.channel_monitor import ChannelMonitor
 
 load_dotenv()
 
-def get_top_channels(limit=100):
-    client_id = os.getenv("TWITCH_CLIENT_ID")
-    access_token = os.getenv("TWITCH_ACCESS_TOKEN")
-    if not client_id or not access_token:
-        raise ValueError("TWITCH_CLIENT_ID and TWITCH_ACCESS_TOKEN must be set in the environment.")
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-    url = "https://api.twitch.tv/helix/streams"
-    headers = {
-        "Client-ID": client_id,
-        "Authorization": f"Bearer {access_token}",
-    }
-    params = {
-        "first": limit,
-    }
+app = FastAPI()
 
-    response = requests.get(url, headers=headers, params=params)
-    response.raise_for_status()
-    streams_data = response.json().get("data", [])
+mongo_uri = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
+client = MongoClient(mongo_uri)
+db_name = os.getenv("MONGODB_DB", "chat_db")
+collection_name = os.getenv("MONGODB_COLLECTION", "chat_messages")
+db = client[db_name]
+collection = db[collection_name]
 
-    channels = []
-    for stream in streams_data:
-        # Use user_login if available; otherwise, use user_name in lowercase
-        channel = stream.get("user_login") or stream.get("user_name", "").lower()
-        channels.append(channel)
-    return channels
+poll_interval = int(os.getenv("CHANNEL_MONITOR_POLL_INTERVAL", "300"))
+monitor = ChannelMonitor(poll_interval=poll_interval, limit=100)
+
+@app.on_event("startup")
+def on_startup():
+    logger.info("Starting Channel Monitor...")
+    monitor.start()
+
+@app.on_event("shutdown")
+def on_shutdown():
+    logger.info("Stopping Channel Monitor...")
+    monitor.stop()
+    monitor.close()
+    client.close()
+
+@app.get("/messages")
+def get_messages(start_time: str, end_time: str):
+    """
+    Fetch all chat messages within a given UTC date/time range.
+
+    Provide ISO-8601 formatted strings for start_time and end_time (e.g., 2023-01-01T00:00:00).
+    """
+    try:
+        dt_start = datetime.fromisoformat(start_time)
+        dt_end = datetime.fromisoformat(end_time)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date/time format. Use ISO-8601.")
+
+    query = {"timestamp": {"$gte": dt_start, "$lte": dt_end}}
+    cursor = collection.find(query)
+    messages = []
+    for doc in cursor:
+        doc["_id"] = str(doc["_id"])
+        doc["timestamp"] = doc["timestamp"].isoformat()
+        messages.append(doc)
+
+    return {"count": len(messages), "messages": messages}
+
+@app.post("/monitor/start")
+def start_monitor():
+    monitor.start()
+    return {"status": "ChannelMonitor started"}
+
+@app.post("/monitor/stop")
+def stop_monitor():
+    monitor.stop()
+    return {"status": "ChannelMonitor stopped"}
 
 if __name__ == "__main__":
-    poll_interval = 60  # seconds between polls
-    # A dictionary to map channel name -> (ChatConsumer instance, thread)
-    channel_consumers = {}
-
-    while True:
-        try:
-            top_channels = set(get_top_channels(limit=100))
-            print(f"Retrieved {len(top_channels)} channels from Twitch.")
-        except Exception as e:
-            print(f"Error retrieving top channels: {e}")
-            time.sleep(poll_interval)
-            continue
-
-        # Start chat consumers for new channels that are in the top channels
-        for channel in top_channels:
-            if channel not in channel_consumers:
-                print(f"Starting chat consumer for channel: {channel}")
-                consumer = ChatConsumer(channel)
-                thread = threading.Thread(target=consumer.consume_chats)
-                thread.daemon = True
-                channel_consumers[channel] = (consumer, thread)
-                thread.start()
-
-        # Stop and remove consumers for channels that are no longer in the top channels
-        channels_to_remove = [channel for channel in channel_consumers if channel not in top_channels]
-        for channel in channels_to_remove:
-            print(f"Stopping chat consumer for channel: {channel}")
-            consumer, thread = channel_consumers[channel]
-            consumer.stop()  # Signal the consumer to shut down gracefully
-            thread.join()    # Wait for the thread to finish
-            del channel_consumers[channel]
-
-        # Wait for the next polling interval
-        time.sleep(poll_interval)
+    uvicorn.run(app, host="0.0.0.0", port=8000)
