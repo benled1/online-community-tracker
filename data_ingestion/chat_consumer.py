@@ -6,13 +6,16 @@ import socket
 import threading
 import time
 from datetime import datetime
-
-# Import the MongoClient type for type hints (if desired)
 from pymongo import MongoClient
 
 logger = logging.getLogger(__name__)
 
 class ChatConsumer:
+    """
+    Handles the consumption of chats from a given channel. Messages are read into a buffer which then is emptied into
+    a MongoDB once it reaches a certain size. It is intended for one ChatConsumer to be responsibile for consuming all chats 
+    for a single channel. 
+    """
     def __init__(self, channel_name: str, mongo_client: MongoClient) -> None:
         self.channel = channel_name
 

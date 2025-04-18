@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from pymongo import MongoClient
 
-from data_ingestion.channel_monitor import ChannelMonitor
+from data_ingestion.channels_monitor import ChannelsMonitor
 
 load_dotenv()
 
@@ -24,7 +24,7 @@ db = client[db_name]
 collection = db[collection_name]
 
 poll_interval = int(os.getenv("CHANNEL_MONITOR_POLL_INTERVAL", "300"))
-monitor = ChannelMonitor(poll_interval=poll_interval, limit=100)
+monitor = ChannelsMonitor(evaluation_interval=poll_interval, channel_limit=100)
 
 @app.on_event("startup")
 def on_startup():
